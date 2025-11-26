@@ -223,6 +223,7 @@ class PolymarketDownloader:
         fidelity: int = 60,
         include_closed: bool = False,
         active_only: bool = True,
+        closed_only: bool = False,
         min_volume: float = 0,
         exclude_patterns: List[str] = None,
         max_markets: int = 0
@@ -235,6 +236,7 @@ class PolymarketDownloader:
             fidelity: Resolution in minutes (default: 60 = hourly)
             include_closed: Whether to include closed events
             active_only: Only download for markets that are accepting orders
+            closed_only: Only download closed/resolved markets
             min_volume: Minimum volume to include market
             exclude_patterns: List of patterns to exclude from market questions
             max_markets: Maximum number of markets to process (0 = no limit)
@@ -260,7 +262,10 @@ class PolymarketDownloader:
             return
 
         # Filter markets if needed
-        if active_only:
+        if closed_only:
+            markets = [m for m in markets if m.get("closed")]
+            logger.info(f"Filtered to {len(markets)} closed/resolved markets")
+        elif active_only:
             markets = [m for m in markets if m.get("active") and m.get("acceptingOrders")]
             logger.info(f"Filtered to {len(markets)} active markets accepting orders")
 
@@ -476,6 +481,11 @@ def main():
         help="Include closed events/markets"
     )
     parser.add_argument(
+        "--closed-only",
+        action="store_true",
+        help="Only download closed/resolved markets"
+    )
+    parser.add_argument(
         "--all-markets",
         action="store_true",
         help="Include all markets, not just those accepting orders"
@@ -525,8 +535,9 @@ def main():
     downloader.download_historical_data(
         days=args.days,
         fidelity=args.fidelity,
-        include_closed=args.include_closed,
-        active_only=not args.all_markets,
+        include_closed=args.include_closed or args.closed_only,
+        active_only=not args.all_markets and not args.closed_only,
+        closed_only=args.closed_only,
         min_volume=args.min_volume,
         exclude_patterns=exclude_patterns,
         max_markets=args.max_markets

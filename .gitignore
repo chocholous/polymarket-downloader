@@ -11,12 +11,6 @@ venv/
 env/
 .venv/
 
-# Data output
-data/
-output/
-*.csv
-*.json
-
 # IDE
 .idea/
 .vscode/
