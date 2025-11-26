@@ -296,8 +296,21 @@ class PolymarketDownloader:
         # For binary markets (Yes/No), we only need one token as No = 1 - Yes
         tokens = []
         for market in markets:
+            # clobTokenIds may be a JSON string or a list
             clob_token_ids = market.get("clobTokenIds", [])
+            if isinstance(clob_token_ids, str):
+                try:
+                    clob_token_ids = json.loads(clob_token_ids)
+                except json.JSONDecodeError:
+                    clob_token_ids = []
+
+            # outcomes may also be a JSON string
             outcomes = market.get("outcomes", [])
+            if isinstance(outcomes, str):
+                try:
+                    outcomes = json.loads(outcomes)
+                except json.JSONDecodeError:
+                    outcomes = []
 
             # Only take the first token (usually "Yes") for binary markets
             # This is sufficient since No price = 1 - Yes price
