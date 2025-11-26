@@ -41,6 +41,35 @@ BATCH_DELAY = 2.0  # seconds between batches of requests
 # Maximum interval for price history (API limit is ~14 days)
 MAX_INTERVAL_DAYS = 14
 
+# Primary category tags (in priority order)
+PRIMARY_CATEGORIES = [
+    "Politics", "Sports", "Crypto", "Pop Culture", "Science",
+    "Technology", "Finance", "Economics", "Entertainment",
+    "NBA", "NFL", "Soccer", "Baseball", "Hockey", "MMA", "Tennis", "Golf",
+    "Bitcoin", "Ethereum", "AI", "Climate", "Health"
+]
+
+
+def extract_primary_category(tags: List[Dict]) -> str:
+    """Extract the primary category from event tags."""
+    if not tags:
+        return "Other"
+
+    tag_labels = [t.get("label", "").lower() for t in tags if t.get("label")]
+
+    # Check for primary categories in priority order
+    for category in PRIMARY_CATEGORIES:
+        if category.lower() in tag_labels:
+            return category
+
+    # Return first tag label if no primary category found
+    for t in tags:
+        label = t.get("label", "")
+        if label and label.lower() != "all":
+            return label
+
+    return "Other"
+
 
 class RateLimiter:
     """Simple rate limiter to respect API limits."""
@@ -160,9 +189,14 @@ class PolymarketDownloader:
         markets = []
         for event in events:
             event_markets = event.get("markets", [])
+            event_tags = event.get("tags", [])
+            category = extract_primary_category(event_tags)
+
             for market in event_markets:
                 market["event_title"] = event.get("title", "")
                 market["event_slug"] = event.get("slug", "")
+                market["category"] = category
+                market["tags"] = [t.get("label", "") for t in event_tags if t.get("label")]
                 markets.append(market)
 
         logger.info(f"Total markets extracted: {len(markets)}")
@@ -226,7 +260,8 @@ class PolymarketDownloader:
         closed_only: bool = False,
         min_volume: float = 0,
         exclude_patterns: List[str] = None,
-        max_markets: int = 0
+        max_markets: int = 0,
+        max_per_category: int = 0
     ):
         """
         Download historical price data for all markets.
@@ -240,6 +275,7 @@ class PolymarketDownloader:
             min_volume: Minimum volume to include market
             exclude_patterns: List of patterns to exclude from market questions
             max_markets: Maximum number of markets to process (0 = no limit)
+            max_per_category: Maximum markets per category (0 = no limit)
         """
         if exclude_patterns is None:
             exclude_patterns = []
@@ -283,6 +319,33 @@ class PolymarketDownloader:
             ]
             logger.info(f"Excluded {original_count - len(markets)} markets matching patterns: {exclude_patterns}")
             logger.info(f"Remaining markets: {len(markets)}")
+
+        # Apply per-category limit
+        if max_per_category > 0:
+            from collections import defaultdict
+
+            # Group markets by category
+            by_category = defaultdict(list)
+            for m in markets:
+                cat = m.get("category", "Other")
+                by_category[cat].append(m)
+
+            # Log category distribution
+            logger.info(f"Found {len(by_category)} categories:")
+            for cat, cat_markets in sorted(by_category.items(), key=lambda x: -len(x[1])):
+                logger.info(f"  {cat}: {len(cat_markets)} markets")
+
+            # Select top N per category by volume
+            selected_markets = []
+            for cat, cat_markets in by_category.items():
+                sorted_by_volume = sorted(cat_markets, key=lambda x: float(x.get("volume", 0) or 0), reverse=True)
+                selected = sorted_by_volume[:max_per_category]
+                selected_markets.extend(selected)
+                if len(cat_markets) > max_per_category:
+                    logger.info(f"  {cat}: selected top {len(selected)} of {len(cat_markets)} by volume")
+
+            markets = selected_markets
+            logger.info(f"After per-category limit: {len(markets)} markets")
 
         # Apply max markets limit
         if max_markets > 0 and len(markets) > max_markets:
@@ -515,6 +578,12 @@ def main():
         help="Maximum number of markets to download (0 = no limit)"
     )
     parser.add_argument(
+        "--max-per-category",
+        type=int,
+        default=0,
+        help="Maximum markets per category (0 = no limit). Selects top N by volume per category."
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="Enable verbose logging"
@@ -540,7 +609,8 @@ def main():
         closed_only=args.closed_only,
         min_volume=args.min_volume,
         exclude_patterns=exclude_patterns,
-        max_markets=args.max_markets
+        max_markets=args.max_markets,
+        max_per_category=args.max_per_category
     )
 
     logger.info("=" * 60)
